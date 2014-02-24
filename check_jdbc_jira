@@ -1,0 +1,110 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# Copyright (c) 2013, Lennart von Niebelschütz
+# <lvniebelschuetz@seibert-media.net>, Rico Ullmann <rullmann@seibert-media.net>
+#
+# Permission to use, copy, modify, and/or distribute this software for any
+# purpose with or without fee is hereby granted, provided that the above
+# copyright notice and this permission notice appear in all copies.
+#
+# THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+# WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+# MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+# ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+# WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+# ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+# OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+#
+
+from argparse import ArgumentParser, RawDescriptionHelpFormatter
+from json import loads
+from sys import exit
+from urllib2 import urlopen, URLError
+
+OK = 0
+WARNING = 1
+CRITICAL = 2
+UNKNOWN = 3
+
+# Info
+# maxidle              The maximum number of connections that can remain idle in the pool.
+# minidle              The minimum number of idle connections in the pool.
+# maxactive            The maximum number of active connections that can be allocated at the same time.
+# numidle              The current number of idle connections that are waiting to be allocated from this data source.
+# numactive            The current number of active connections that have been allocated from this data source.
+
+parser = ArgumentParser(
+    prog="check_jdbc_jira",
+    description="Icinga/Nagios plugin to check various values " + \
+                "returned by a jolokia agent",
+    formatter_class=RawDescriptionHelpFormatter,
+)
+
+parser.add_argument("-b", "--baseurl",
+    type=str,
+    metavar="URL",
+    dest='baseurl',
+    default="http://localhost:8080/jolokia",
+    help="base URL (default: http://localhost:8080/jolokia)",
+)
+
+parser.add_argument("-w", "--warning",
+    type=int,
+    metavar="THRESHOLD",
+    dest='threshold_warn',
+    default=80,
+)
+
+parser.add_argument("-c", "--critical",
+    type=int,
+    metavar="THRESHOLD",
+    dest='threshold_crit',
+    default=90,
+)
+
+jdbc_jira_maxactive = "/read/com.atlassian.jira:name=BasicDataSource/MaxActive"
+jdbc_jira_numactive = "/read/com.atlassian.jira:name=BasicDataSource/NumActive"
+
+
+def download(url):
+    try:
+        json = urlopen(url)
+    except URLError as e:
+        print("failed to download data from {0}: {1}".format(
+            url,
+            e.reason,
+        ))
+        exit(UNKNOWN)
+    return loads(json.read())
+
+if __name__ == '__main__':
+    args = parser.parse_args()
+
+    url = None
+
+    datamaxactive = download(args.baseurl + jdbc_jira_maxactive)
+    datanumactive = download(args.baseurl + jdbc_jira_numactive)
+
+
+    try:
+        nummaxactive = datamaxactive['value']
+        numnumactive = datanumactive['value']
+    except KeyError:
+        print("received invalid data from jolokia: {}".format(data))
+        exit(UNKNOWN)
+
+    percent = int(100.0 * numnumactive / nummaxactive)
+
+    print("{} active connections from {} maximum active connections. That are {} %".format(
+        numnumactive,
+        nummaxactive,
+        percent,
+    ))
+
+    if percent > args.threshold_crit:
+        exit(CRITICAL)
+    elif percent > args.threshold_warn:
+        exit(WARNING)
+    else:
+        exit(OK)
